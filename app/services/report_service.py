@@ -35,14 +35,22 @@ def calculate_daily_report(owner_id: str) -> Dict[str, Any]:
                 "totalDistanceKm": 0.0,
                 "totalEarnings": 0.0,
                 "totalFuelCost": 0.0,
+                "totalTollAmount": 0.0,
+                "totalLoadingUnloadingAmount": 0.0,
                 "totalOtherExpenses": 0.0,
                 "netProfit": 0.0
             }
         item = daily_map[d]
         item["totalTrips"] += 1
-        item["totalDistanceKm"] += float(t.get("distanceKm", 0.0))
-        item["totalFuelCost"] += float(t.get("fuelCost", 0.0))
-        item["totalOtherExpenses"] += float(t.get("otherExpenses", 0.0))
+        item["totalDistanceKm"] += float(t.get("distanceKm", 0.0) or 0.0)
+        
+        fuel = t.get("fuelCost")
+        if fuel is not None:
+            item["totalFuelCost"] += float(fuel)
+            
+        item["totalTollAmount"] += float(t.get("tollAmount", 0.0) or 0.0)
+        item["totalLoadingUnloadingAmount"] += float(t.get("loadingUnloadingAmount", 0.0) or 0.0)
+        item["totalOtherExpenses"] += float(t.get("otherExpenses", 0.0) or 0.0)
         
         if t.get("earnings") is not None:
             item["totalEarnings"] += float(t.get("earnings"))
@@ -53,7 +61,10 @@ def calculate_daily_report(owner_id: str) -> Dict[str, Any]:
     
     grand_earnings = sum(i["totalEarnings"] for i in items)
     grand_fuel = sum(i["totalFuelCost"] for i in items)
-    grand_expenses = sum(i["totalOtherExpenses"] for i in items)
+    grand_toll = sum(i["totalTollAmount"] for i in items)
+    grand_loading = sum(i["totalLoadingUnloadingAmount"] for i in items)
+    grand_other = sum(i["totalOtherExpenses"] for i in items)
+    grand_expenses = grand_fuel + grand_toll + grand_loading + grand_other
     grand_profit = sum(i["netProfit"] for i in items)
     
     return {
@@ -78,14 +89,22 @@ def calculate_monthly_report(owner_id: str) -> Dict[str, Any]:
                 "totalDistanceKm": 0.0,
                 "totalEarnings": 0.0,
                 "totalFuelCost": 0.0,
+                "totalTollAmount": 0.0,
+                "totalLoadingUnloadingAmount": 0.0,
                 "totalOtherExpenses": 0.0,
                 "netProfit": 0.0
             }
         item = monthly_map[m]
         item["totalTrips"] += 1
-        item["totalDistanceKm"] += float(t.get("distanceKm", 0.0))
-        item["totalFuelCost"] += float(t.get("fuelCost", 0.0))
-        item["totalOtherExpenses"] += float(t.get("otherExpenses", 0.0))
+        item["totalDistanceKm"] += float(t.get("distanceKm", 0.0) or 0.0)
+        
+        fuel = t.get("fuelCost")
+        if fuel is not None:
+            item["totalFuelCost"] += float(fuel)
+            
+        item["totalTollAmount"] += float(t.get("tollAmount", 0.0) or 0.0)
+        item["totalLoadingUnloadingAmount"] += float(t.get("loadingUnloadingAmount", 0.0) or 0.0)
+        item["totalOtherExpenses"] += float(t.get("otherExpenses", 0.0) or 0.0)
         
         if t.get("earnings") is not None:
             item["totalEarnings"] += float(t.get("earnings"))
@@ -96,7 +115,10 @@ def calculate_monthly_report(owner_id: str) -> Dict[str, Any]:
     
     grand_earnings = sum(i["totalEarnings"] for i in items)
     grand_fuel = sum(i["totalFuelCost"] for i in items)
-    grand_expenses = sum(i["totalOtherExpenses"] for i in items)
+    grand_toll = sum(i["totalTollAmount"] for i in items)
+    grand_loading = sum(i["totalLoadingUnloadingAmount"] for i in items)
+    grand_other = sum(i["totalOtherExpenses"] for i in items)
+    grand_expenses = grand_fuel + grand_toll + grand_loading + grand_other
     grand_profit = sum(i["netProfit"] for i in items)
     
     return {
@@ -117,9 +139,12 @@ def calculate_profit_report(owner_id: str) -> Dict[str, Any]:
     trips_today = sum(1 for t in trips if t.get("date") == today_str)
     
     total_trips = len(trips)
-    total_dist = sum(float(t.get("distanceKm", 0.0)) for t in trips)
-    total_fuel = sum(float(t.get("fuelCost", 0.0)) for t in trips)
-    total_expenses = sum(float(t.get("otherExpenses", 0.0)) for t in trips)
+    total_dist = sum(float(t.get("distanceKm", 0.0) or 0.0) for t in trips)
+    total_fuel = sum(float(t.get("fuelCost")) for t in trips if t.get("fuelCost") is not None)
+    total_toll = sum(float(t.get("tollAmount", 0.0) or 0.0) for t in trips)
+    total_loading = sum(float(t.get("loadingUnloadingAmount", 0.0) or 0.0) for t in trips)
+    total_other = sum(float(t.get("otherExpenses", 0.0) or 0.0) for t in trips)
+    total_expenses = total_fuel + total_toll + total_loading + total_other
     
     total_earnings = sum(float(t.get("earnings")) for t in trips if t.get("earnings") is not None)
     net_profit = sum(float(t.get("profit")) for t in trips if t.get("profit") is not None)
@@ -131,7 +156,9 @@ def calculate_profit_report(owner_id: str) -> Dict[str, Any]:
         "totalDistanceKm": total_dist,
         "totalEarnings": total_earnings,
         "totalFuelCost": total_fuel,
-        "totalOtherExpenses": total_expenses,
+        "totalTollAmount": total_toll,
+        "totalLoadingUnloadingAmount": total_loading,
+        "totalOtherExpenses": total_other,
         "netProfit": net_profit,
         "profitMarginPercent": round(profit_margin, 2),
         "totalVehicles": len(vehicles),
@@ -151,60 +178,66 @@ def generate_pdf_report(owner_id: str) -> bytes:
     profit_data = calculate_profit_report(owner_id)
     
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=28, leftMargin=28, topMargin=28, bottomMargin=28)
     story = []
     styles = getSampleStyleSheet()
     
     title_style = ParagraphStyle(
         'DocTitle',
         parent=styles['Heading1'],
-        fontSize=20,
-        leading=24,
+        fontSize=18,
+        leading=22,
         textColor=colors.HexColor("#2563EB"),
-        spaceAfter=12
+        spaceAfter=10
     )
     
-    story.append(Paragraph("Fleet Management - Financial & Operations Report (INR)", title_style))
-    story.append(Spacer(1, 10))
+    story.append(Paragraph("Fleet Management - Operations & Freight Economics Report (INR)", title_style))
+    story.append(Spacer(1, 8))
     
     # Summary Table with INR formatting
     summary_data = [
-        ["Total Trips", str(profit_data["totalTrips"]), "Total Distance (Km)", f"{profit_data['totalDistanceKm']:.2f}"],
-        ["Total Earnings", format_inr(profit_data['totalEarnings']), "Total Fuel Cost", format_inr(profit_data['totalFuelCost'])],
-        ["Other Expenses", format_inr(profit_data['totalOtherExpenses']), "Net Profit", format_inr(profit_data['netProfit'])],
-        ["Profit Margin", f"{profit_data['profitMarginPercent']}%", "", ""]
+        ["Total Trips", str(profit_data["totalTrips"]), "Total Revenue", format_inr(profit_data['totalEarnings'])],
+        ["Total Fuel Cost", format_inr(profit_data['totalFuelCost']), "Total Toll Plaza", format_inr(profit_data['totalTollAmount'])],
+        ["Site / Hamali Charges", format_inr(profit_data['totalLoadingUnloadingAmount']), "Other Expenses", format_inr(profit_data['totalOtherExpenses'])],
+        ["Net Profit", format_inr(profit_data['netProfit']), "Profit Margin", f"{profit_data['profitMarginPercent']}%"]
     ]
-    summary_table = Table(summary_data, colWidths=[120, 130, 130, 140])
+    summary_table = Table(summary_data, colWidths=[130, 140, 140, 140])
     summary_table.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#F1F5F9")),
         ('TEXTCOLOR', (0,0), (-1,-1), colors.HexColor("#1F2937")),
         ('FONTNAME', (0,0), (-1,-1), 'Helvetica-Bold'),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#CBD5E1")),
     ]))
     story.append(summary_table)
-    story.append(Spacer(1, 20))
+    story.append(Spacer(1, 16))
     
-    story.append(Paragraph("Detailed Trips Log", styles['Heading2']))
-    story.append(Spacer(1, 8))
+    story.append(Paragraph("Itemized Trips Log", styles['Heading2']))
+    story.append(Spacer(1, 6))
     
-    headers = ["Date", "Driver ID", "Vehicle ID", "Dist (Km)", "Earnings", "Fuel", "Expenses", "Profit"]
+    headers = ["Date", "Driver", "Vehicle", "Weight", "Revenue", "Fuel", "Toll/Site", "Profit"]
     table_data = [headers]
     
     for t in sorted(trips, key=lambda x: x.get("date", ""), reverse=True):
+        weight_str = f"{float(t.get('materialWeight')):.1f}T" if t.get("materialWeight") is not None else "-"
+        rev_str = format_inr(float(t.get('earnings'))) if t.get('earnings') is not None else "Pending"
+        fuel_str = format_inr(float(t.get('fuelCost'))) if t.get('fuelCost') is not None else "None"
+        toll_and_site = float(t.get('tollAmount', 0.0) or 0.0) + float(t.get('loadingUnloadingAmount', 0.0) or 0.0)
+        profit_str = format_inr(float(t.get('profit'))) if t.get('profit') is not None else "Pending"
+        
         row = [
             str(t.get("date", "")),
             str(t.get("driverId", ""))[:8],
             str(t.get("vehicleId", ""))[:8],
-            f"{float(t.get('distanceKm', 0)):.1f}",
-            format_inr(float(t.get('earnings', 0))),
-            format_inr(float(t.get('fuelCost', 0))),
-            format_inr(float(t.get('otherExpenses', 0))),
-            format_inr(float(t.get('profit', 0)))
+            weight_str,
+            rev_str,
+            fuel_str,
+            format_inr(toll_and_site),
+            profit_str
         ]
         table_data.append(row)
         
-    trips_table = Table(table_data, colWidths=[65, 70, 70, 55, 65, 60, 65, 70])
+    trips_table = Table(table_data, colWidths=[65, 70, 70, 50, 75, 70, 75, 75])
     trips_table.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2563EB")),
         ('TEXTCOLOR', (0,0), (-1,0), colors.white),
@@ -212,7 +245,7 @@ def generate_pdf_report(owner_id: str) -> bytes:
         ('ALIGN', (3,0), (-1,-1), 'RIGHT'),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#E2E8F0")),
         ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor("#F8FAFC")]),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
     ]))
     story.append(trips_table)
     
@@ -233,20 +266,21 @@ def generate_excel_report(owner_id: str) -> bytes:
     ws = wb.active
     ws.title = "Fleet Report"
     
-    ws.merge_cells("A1:H1")
+    ws.merge_cells("A1:K1")
     title_cell = ws["A1"]
-    title_cell.value = "Fleet Management - Operations Report (INR)"
+    title_cell.value = "Fleet Management - Operations & Freight Report (INR)"
     title_cell.font = Font(name="Arial", size=16, bold=True, color="FFFFFF")
     title_cell.fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 35
     
-    summary_headers = ["Total Trips", "Total Distance (Km)", "Total Earnings", "Total Fuel Cost", "Other Expenses", "Net Profit", "Profit Margin"]
+    summary_headers = ["Total Trips", "Total Revenue", "Fuel Cost", "Toll Plaza", "Site Charges", "Other Expenses", "Net Profit", "Profit Margin"]
     summary_values = [
         profit_data["totalTrips"],
-        round(profit_data["totalDistanceKm"], 2),
         format_inr(profit_data["totalEarnings"]),
         format_inr(profit_data["totalFuelCost"]),
+        format_inr(profit_data["totalTollAmount"]),
+        format_inr(profit_data["totalLoadingUnloadingAmount"]),
         format_inr(profit_data["totalOtherExpenses"]),
         format_inr(profit_data["netProfit"]),
         f"{profit_data['profitMarginPercent']}%"
@@ -257,8 +291,8 @@ def generate_excel_report(owner_id: str) -> bytes:
     header_fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
     bold_font = Font(name="Arial", bold=True)
     
-    ws.append(summary_headers[:7])
-    for col_num in range(1, 8):
+    ws.append(summary_headers[:8])
+    for col_num in range(1, 9):
         cell = ws.cell(row=3, column=col_num)
         cell.font = bold_font
         cell.fill = header_fill
@@ -266,7 +300,12 @@ def generate_excel_report(owner_id: str) -> bytes:
     ws.append(summary_values)
     ws.append([])
     
-    trips_headers = ["Date", "Trip ID", "Driver ID", "Vehicle ID", "Distance (Km)", "Earnings (INR)", "Fuel Cost (INR)", "Expenses (INR)", "Profit (INR)", "Start Location", "End Location", "Notes"]
+    trips_headers = [
+        "Date", "Trip ID", "Driver ID", "Vehicle ID", "Weight (MT)", 
+        "Rate (INR)", "Rate Type", "Revenue (INR)", "Fuel Cost (INR)", 
+        "Toll (INR)", "Site Charges (INR)", "Other Expenses (INR)", 
+        "Profit (INR)", "Start Location", "End Location", "Notes"
+    ]
     ws.append(trips_headers)
     
     header_row = 6
@@ -280,16 +319,26 @@ def generate_excel_report(owner_id: str) -> bytes:
         cell.alignment = Alignment(horizontal="center")
         
     for t in sorted(trips, key=lambda x: x.get("date", ""), reverse=True):
+        weight_val = float(t.get("materialWeight")) if t.get("materialWeight") is not None else ""
+        rate_val = float(t.get("rate")) if t.get("rate") is not None else ""
+        rev_val = format_inr(float(t.get("earnings"))) if t.get("earnings") is not None else "Pending"
+        fuel_val = format_inr(float(t.get("fuelCost"))) if t.get("fuelCost") is not None else "None"
+        profit_val = format_inr(float(t.get("profit"))) if t.get("profit") is not None else "Pending"
+        
         row = [
             t.get("date", ""),
             t.get("id", ""),
             t.get("driverId", ""),
             t.get("vehicleId", ""),
-            float(t.get("distanceKm", 0.0)),
-            format_inr(float(t.get("earnings", 0.0))),
-            format_inr(float(t.get("fuelCost", 0.0))),
-            format_inr(float(t.get("otherExpenses", 0.0))),
-            format_inr(float(t.get("profit", 0.0))),
+            weight_val,
+            rate_val,
+            t.get("rateType", ""),
+            rev_val,
+            fuel_val,
+            float(t.get("tollAmount", 0.0) or 0.0),
+            float(t.get("loadingUnloadingAmount", 0.0) or 0.0),
+            float(t.get("otherExpenses", 0.0) or 0.0),
+            profit_val,
             t.get("startLocation", ""),
             t.get("endLocation", ""),
             t.get("notes", "")

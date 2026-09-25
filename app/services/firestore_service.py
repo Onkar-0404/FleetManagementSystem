@@ -201,31 +201,59 @@ def assign_vehicle_to_driver(owner_id: str, driver_id: str, vehicle_id: Optional
 
     # If vehicle_id is provided and not empty
     if vehicle_id and vehicle_id.strip():
-        vehicle_ref = db.collection("vehicles").document(vehicle_id)
+        target_veh_id = vehicle_id.strip()
+        vehicle_ref = db.collection("vehicles").document(target_veh_id)
         vehicle_doc = vehicle_ref.get()
+
+        # Fallback: Check if target_veh_id matches regNumber
         if not vehicle_doc.exists:
-            return None, "Vehicle not found"
-        
+            query = db.collection("vehicles").where("ownerId", "==", owner_id).where("regNumber", "==", target_veh_id).limit(1).stream()
+            found_doc = None
+            for doc in query:
+                found_doc = doc
+                break
+            if found_doc:
+                vehicle_doc = found_doc
+                target_veh_id = found_doc.id
+                vehicle_ref = db.collection("vehicles").document(target_veh_id)
+            else:
+                return None, "Vehicle not found"
+
         vehicle = vehicle_doc.to_dict()
         if vehicle.get("ownerId") != owner_id:
             return None, "Unauthorized vehicle access"
-        
-        # Check if vehicle is assigned to another driver
+
         current_assigned_driver = vehicle.get("assignedDriverId")
+
+        # If vehicle was assigned to a different driver, unassign that driver first
         if current_assigned_driver and current_assigned_driver != driver_id:
-            return None, "Vehicle already assigned to another driver."
-        
-        # Unassign old vehicle if different
-        if old_vehicle_id and old_vehicle_id != vehicle_id:
-            db.collection("vehicles").document(old_vehicle_id).update({"assignedDriverId": None})
-        
-        # Assign new vehicle
+            old_driver_ref = db.collection("drivers").document(current_assigned_driver)
+            if old_driver_ref.get().exists:
+                old_driver_ref.update({"assignedVehicleId": None})
+
+        # Unassign old vehicle from current driver if different
+        if old_vehicle_id and old_vehicle_id != target_veh_id:
+            old_veh_ref = db.collection("vehicles").document(old_vehicle_id)
+            if old_veh_ref.get().exists:
+                old_veh_ref.update({"assignedDriverId": None})
+            else:
+                q = db.collection("vehicles").where("ownerId", "==", owner_id).where("regNumber", "==", old_vehicle_id).stream()
+                for doc in q:
+                    doc.reference.update({"assignedDriverId": None})
+
+        # Assign new vehicle to driver and driver to vehicle
         vehicle_ref.update({"assignedDriverId": driver_id})
-        driver_ref.update({"assignedVehicleId": vehicle_id})
+        driver_ref.update({"assignedVehicleId": target_veh_id})
     else:
         # Unassign current vehicle
         if old_vehicle_id:
-            db.collection("vehicles").document(old_vehicle_id).update({"assignedDriverId": None})
+            old_veh_ref = db.collection("vehicles").document(old_vehicle_id)
+            if old_veh_ref.get().exists:
+                old_veh_ref.update({"assignedDriverId": None})
+            else:
+                q = db.collection("vehicles").where("ownerId", "==", owner_id).where("regNumber", "==", old_vehicle_id).stream()
+                for doc in q:
+                    doc.reference.update({"assignedDriverId": None})
         driver_ref.update({"assignedVehicleId": None})
 
     updated_driver = driver_ref.get().to_dict()
@@ -244,25 +272,59 @@ def get_driver_assigned_vehicle(driver_id: str) -> Optional[Dict[str, Any]]:
                 v = vehicle_doc.to_dict()
                 v["id"] = vehicle_doc.id
                 return v
+            # Fallback by regNumber
+            query = db.collection("vehicles").where("regNumber", "==", vehicle_id).limit(1).stream()
+            for doc in query:
+                v = doc.to_dict()
+                v["id"] = doc.id
+                return v
     return None
 
 
 # Trip Service
+def calculate_trip_financials(trip_data: Dict[str, Any]) -> None:
+    rate = trip_data.get("rate")
+    rate_type = trip_data.get("rateType", "per_weight")
+    weight = trip_data.get("materialWeight")
+
+    earnings = None
+    if rate is not None:
+        try:
+            rate_val = float(rate)
+            if rate_type == "per_weight":
+                if weight is not None:
+                    earnings = round(rate_val * float(weight), 2)
+            elif rate_type == "flat":
+                earnings = round(rate_val, 2)
+        except (ValueError, TypeError):
+            earnings = None
+    elif trip_data.get("earnings") is not None:
+        try:
+            earnings = round(float(trip_data.get("earnings")), 2)
+        except (ValueError, TypeError):
+            earnings = None
+
+    fuel_val = trip_data.get("fuelCost")
+    fuel = float(fuel_val) if fuel_val is not None else 0.0
+    toll = float(trip_data.get("tollAmount", 0.0) or 0.0)
+    loading = float(trip_data.get("loadingUnloadingAmount", 0.0) or 0.0)
+    other = float(trip_data.get("otherExpenses", 0.0) or 0.0)
+
+    total_cost = round(fuel + toll + loading + other, 2)
+
+    profit = None
+    if earnings is not None:
+        profit = round(earnings - total_cost, 2)
+
+    trip_data["earnings"] = earnings
+    trip_data["profit"] = profit
+
 def create_trip(owner_id: str, driver_id: str, trip_data: Dict[str, Any]) -> Dict[str, Any]:
     db = get_db()
     trip_data["ownerId"] = owner_id
     trip_data["driverId"] = driver_id
     
-    earnings = trip_data.get("earnings")
-    if earnings is not None:
-        earnings = float(earnings)
-        fuel = float(trip_data.get("fuelCost", 0.0))
-        other = float(trip_data.get("otherExpenses", 0.0))
-        trip_data["earnings"] = earnings
-        trip_data["profit"] = earnings - fuel - other
-    else:
-        trip_data["earnings"] = None
-        trip_data["profit"] = None
+    calculate_trip_financials(trip_data)
     
     doc_ref = db.collection("trips").document()
     trip_id = doc_ref.id
@@ -287,18 +349,23 @@ def update_trip(trip_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any
         data = doc.to_dict()
         clean_updates = {k: v for k, v in updates.items() if v is not None}
         if clean_updates:
-            earnings = clean_updates.get("earnings", data.get("earnings"))
-            if earnings is not None:
-                earnings = float(earnings)
-                fuel = float(clean_updates.get("fuelCost", data.get("fuelCost", 0.0)))
-                other = float(clean_updates.get("otherExpenses", data.get("otherExpenses", 0.0)))
-                clean_updates["earnings"] = earnings
-                clean_updates["profit"] = earnings - fuel - other
+            merged = {**data, **clean_updates}
+            calculate_trip_financials(merged)
+            clean_updates["earnings"] = merged.get("earnings")
+            clean_updates["profit"] = merged.get("profit")
             doc_ref.update(clean_updates)
         updated = doc_ref.get().to_dict()
         updated["id"] = trip_id
         return updated
     return None
+
+def delete_trip(trip_id: str) -> bool:
+    db = get_db()
+    doc_ref = db.collection("trips").document(trip_id)
+    if doc_ref.get().exists:
+        doc_ref.delete()
+        return True
+    return False
 
 
 def get_trips_by_owner(owner_id: str, date: Optional[str] = None, driver_id: Optional[str] = None, vehicle_id: Optional[str] = None) -> List[Dict[str, Any]]:

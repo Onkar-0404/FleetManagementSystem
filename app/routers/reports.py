@@ -1,3 +1,4 @@
+import io
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
 from app.models.schemas import DailyReportResponse, MonthlyReportResponse, ProfitReportResponse
@@ -24,6 +25,7 @@ def get_profit_report(current_user: dict = Depends(require_role("owner"))):
     owner_id = current_user["uid"]
     return calculate_profit_report(owner_id)
 
+@router.get("/pdf")
 @router.get("/export/pdf")
 def export_pdf(current_user: dict = Depends(require_role("owner"))):
     owner_id = current_user["uid"]
@@ -34,8 +36,7 @@ def export_pdf(current_user: dict = Depends(require_role("owner"))):
         headers={"Content-Disposition": "attachment; filename=fleet_report.pdf"}
     )
 
-import io # Ensure io is imported for StreamingResponse BytesIO
-
+@router.get("/excel")
 @router.get("/export/excel")
 def export_excel(current_user: dict = Depends(require_role("owner"))):
     owner_id = current_user["uid"]

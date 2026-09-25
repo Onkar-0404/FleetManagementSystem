@@ -10,7 +10,7 @@ from app.models.schemas import TripCreate, TripUpdate, TripResponse
 from app.core.security import get_current_user, require_role, log_security_event
 from app.services.firestore_service import (
     create_trip, get_trips_by_owner, get_trips_by_driver, get_driver_by_user_id,
-    get_trip_by_id, update_trip
+    get_trip_by_id, update_trip, delete_trip
 )
 
 router = APIRouter(prefix="/trips", tags=["Trips"])
@@ -149,19 +149,30 @@ def log_trip(
     user_id = current_user["uid"]
     role = current_user.get("role")
     
+    trip_dict = req.dict()
     if role == "driver":
         driver_doc = get_driver_by_user_id(user_id)
         if not driver_doc:
             raise HTTPException(status_code=400, detail="Driver record not found")
         driver_id = driver_doc["id"]
         owner_id = driver_doc["ownerId"]
+        # Driver cannot set owner commercial fields
+        trip_dict.pop("rate", None)
+        trip_dict.pop("rateType", None)
+        trip_dict.pop("earnings", None)
     elif role == "owner":
         owner_id = user_id
         driver_id = "owner_log"
     else:
         raise HTTPException(status_code=403, detail="Unauthorized role")
         
-    created = create_trip(owner_id, driver_id, req.dict())
+    created = create_trip(owner_id, driver_id, trip_dict)
+    if role == "driver":
+        # Mask commercial fields for driver response
+        created["rate"] = None
+        created["rateType"] = None
+        created["earnings"] = None
+        created["profit"] = None
     log_security_event("TRIP_CREATED", user_id, f"Trip {created.get('id')} logged successfully")
     return created
 
@@ -183,6 +194,32 @@ def update_trip_endpoint(
     log_security_event("TRIP_UPDATED", owner_id, f"Trip {trip_id} updated successfully")
     return updated
 
+@router.delete("/{trip_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_trip_endpoint(
+    trip_id: str,
+    current_user: dict = Depends(require_role("owner"))
+):
+    owner_id = current_user["uid"]
+    existing = get_trip_by_id(trip_id)
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Trip not found"
+        )
+    if existing.get("ownerId") != owner_id:
+        log_security_event("BOLA_UNAUTHORIZED_TRIP_DELETE", owner_id, f"Attempted to delete trip {trip_id} owned by {existing.get('ownerId')}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized to delete this trip"
+        )
+
+    deleted = delete_trip(trip_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trip not found")
+
+    log_security_event("TRIP_DELETED", owner_id, f"Trip {trip_id} deleted successfully")
+    return None
+
 @router.get("/me", response_model=List[TripResponse])
 def get_my_trips(current_user: dict = Depends(get_current_user)):
     user_id = current_user["uid"]
@@ -192,7 +229,13 @@ def get_my_trips(current_user: dict = Depends(get_current_user)):
         driver_doc = get_driver_by_user_id(user_id)
         if not driver_doc:
             return []
-        return get_trips_by_driver(driver_doc["id"])
+        trips = get_trips_by_driver(driver_doc["id"])
+        for t in trips:
+            t["rate"] = None
+            t["rateType"] = None
+            t["earnings"] = None
+            t["profit"] = None
+        return trips
     elif role == "owner":
         return get_trips_by_owner(user_id)
     return []

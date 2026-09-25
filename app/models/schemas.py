@@ -125,9 +125,14 @@ class TripCreate(BaseModel):
     date: str  # YYYY-MM-DD
     startLocation: str
     endLocation: str
-    distanceKm: float = Field(ge=0, description="Distance must be non-negative")
-    fuelCost: float = Field(ge=0, description="Fuel cost must be non-negative")
+    distanceKm: Optional[float] = Field(default=None, ge=0, description="Optional distance for backward compatibility")
+    fuelCost: Optional[float] = Field(default=None, ge=0, description="Fuel cost is optional")
+    materialWeight: Optional[float] = Field(default=None, gt=0, description="Material cargo weight in tons")
+    loadingUnloadingAmount: float = Field(default=0.0, ge=0, description="Loading / unloading site charges")
+    tollAmount: float = Field(default=0.0, ge=0, description="Toll plaza charges")
     otherExpenses: float = Field(default=0.0, ge=0, description="Other expenses must be non-negative")
+    rate: Optional[float] = Field(default=None, ge=0, description="Agreed freight rate (owner only)")
+    rateType: Optional[str] = Field(default="per_weight", description="per_weight or flat")
     earnings: Optional[float] = Field(default=None, description="Earnings optional at creation")
     notes: Optional[str] = None
     receiptUrl: Optional[str] = None
@@ -139,7 +144,12 @@ class TripUpdate(BaseModel):
     endLocation: Optional[str] = None
     distanceKm: Optional[float] = None
     fuelCost: Optional[float] = None
+    materialWeight: Optional[float] = None
+    loadingUnloadingAmount: Optional[float] = None
+    tollAmount: Optional[float] = None
     otherExpenses: Optional[float] = None
+    rate: Optional[float] = None
+    rateType: Optional[str] = None
     earnings: Optional[float] = None
     notes: Optional[str] = None
     receiptUrl: Optional[str] = None
@@ -152,9 +162,14 @@ class TripResponse(BaseModel):
     date: str
     startLocation: str
     endLocation: str
-    distanceKm: float
-    fuelCost: float
-    otherExpenses: float
+    distanceKm: Optional[float] = None
+    fuelCost: Optional[float] = None
+    materialWeight: Optional[float] = None
+    loadingUnloadingAmount: float = 0.0
+    tollAmount: float = 0.0
+    otherExpenses: float = 0.0
+    rate: Optional[float] = None
+    rateType: Optional[str] = None
     earnings: Optional[float] = None
     profit: Optional[float] = None
     notes: Optional[str] = None
@@ -165,9 +180,11 @@ class TripResponse(BaseModel):
 class DailyReportItem(BaseModel):
     date: str
     totalTrips: int
-    totalDistanceKm: float
+    totalDistanceKm: float = 0.0
     totalEarnings: float
     totalFuelCost: float
+    totalTollAmount: float = 0.0
+    totalLoadingUnloadingAmount: float = 0.0
     totalOtherExpenses: float
     netProfit: float
 
@@ -181,9 +198,11 @@ class DailyReportResponse(BaseModel):
 class MonthlyReportItem(BaseModel):
     month: str  # YYYY-MM
     totalTrips: int
-    totalDistanceKm: float
+    totalDistanceKm: float = 0.0
     totalEarnings: float
     totalFuelCost: float
+    totalTollAmount: float = 0.0
+    totalLoadingUnloadingAmount: float = 0.0
     totalOtherExpenses: float
     netProfit: float
 
@@ -196,9 +215,11 @@ class MonthlyReportResponse(BaseModel):
 
 class ProfitReportResponse(BaseModel):
     totalTrips: int
-    totalDistanceKm: float
+    totalDistanceKm: float = 0.0
     totalEarnings: float
     totalFuelCost: float
+    totalTollAmount: float = 0.0
+    totalLoadingUnloadingAmount: float = 0.0
     totalOtherExpenses: float
     netProfit: float
     profitMarginPercent: float
